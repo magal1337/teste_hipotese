@@ -1,0 +1,271 @@
+---
+title: "Teste A/B - Cookie Cats"
+output: github_document
+---
+
+```{r,echo = FALSE,warning=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(powerMediation)
+library(broom)
+library(knitr)
+library(kableExtra)
+```
+
+## Afinal o que é Cookie Cats?
+
+Cookie cats é um jogo mobile de puzzles desenvolvido pela [Tactile Entertainment](https://tactilegames.com/). Muito parecido com o nosso queridíssimo Candy Crush!
+<br>
+A medida que o jogador for passando de nível, ele vai ocasionalmente encontrando “barreiras” que o forçam a esperar um certo tempo para voltar a jogar, ou obrigam a comprar algo no aplicativo para poder continuar a progredir no jogo. Isso acaba que ao longo do tempo haja um grande impacto na taxa de retenção do jogo. Os players acabam desanimando por ter que esperar ou comprar alguma coisa para continuar jogando e acabam desistindo. 
+<br>
+Originalmente, essa barreira era posta quando o jogador alcançasse o nível 30.
+
+![O jogo Cookie Cats](https://tactilegames.com/wp-content/uploads/2018/05/cookie-cats.png)
+
+## Teste A/B no Cookie Cats
+
+Esse é um projeto da nossa maravilhosa plataforma chamada [DataCamp!](https://www.datacamp.com/) Vamos tentar formular uma hipótese de que, se movermos a barreira para o nível 40 podemos trazer algum impacto na melhoria da nossa taxa de retenção.
+
+Poderíamos montar da seguinte forma:
+<br>
+**H~0~:** Mover a barreira para o nível 40 <span style="color:red"> **não** </span> traz diferença significativa na taxa de retenção
+<br>
+**H~a~:** Mover a barreira para o nível 40 <span style="color:red">  **traz** </span> uma  diferença significativa na taxa de retenção
+
+Mas antes, vamos dar uma olhada em nossos dados.
+
+<span style="color:orange"> **Importante:** </span> Como estaremos trabalhando com uma base sem dados de tempo, nosso teste pode sofrer efeitos de variáveis confusas. Época de promoção ou sazonalidade no período em que os dados foram coletados. Temos que levar tudo isso em conta quando formos validar o resultado do nosso teste.
+
+## Explorando o Dataset 
+
+```{r,echo=TRUE}
+path<-file.path("C:\\Users\\lferreira\\Desktop\\backup lucas\\cookie_cats.csv")
+cookie_cats<-read.csv(path,sep=",",header = TRUE)
+glimpse(cookie_cats)
+summary(cookie_cats)
+```
+
+Nossa base de dados contém 90.189 observaçoes, uma observação para cada id de jogador.
+<br>
+Ela contêm 5 variáveis:
+<br>
+<br>
+`userid`: Chave primária da nossa base de dados (id_jogador)
+<br>
+`version`: Para qual nível a barreira foi colocada (30 ou 40)
+<br>
+`sum_gamerounds`: Número de rounds jogados pelo jogador durante uma semana após a instalação do jogo
+<br>
+`retention_1`: Valor lógico, o jogador conseguiu após a instalação jogar pelo menos 1 dia?
+<br>
+`retention_7`: Valor lógico, o jogador conseguiu após a instalação jogar pelo menos 7 dias?
+<br>
+<br>
+Temos também uma amostra um pouco maior para a variável teste **"barreira 40"** do que a nossa variável de controle **"barreira 30"**, 45.489 observações contra 44.700 observações.
+
+Vamos dar uma olhada na distribuição da variável, número de rounds jogados:
+```{r,echo=TRUE}
+ggplot(cookie_cats,aes(sum_gamerounds,fill="red"))+
+  geom_density()
+ggplot(cookie_cats,aes(y = sum_gamerounds,fill="red"))+
+  geom_boxplot()
+
+```
+
+Humm.. Parece que temos um jogador com mais de 45.000 rounds jogadas em apenas 1 semana! Outlier claro! Vamos retirá-lo da análise
+
+```{r,echo=TRUE}
+cookie_cats%>%
+  filter(sum_gamerounds<45000)%>%
+ggplot(aes(sum_gamerounds,fill="red"))+
+  geom_density()
+
+cookie_cats%>%
+  filter(sum_gamerounds<45000)%>%
+ggplot(aes(y = sum_gamerounds,fill="red"))+
+  geom_boxplot()
+
+```
+
+Claramente, os dados não estão seguindo uma distribuição normal, dificultando a visualização dos dados... Será?
+
+```{r,echo=TRUE}
+set.seed(42)
+sample_cookie_cats<-sample(cookie_cats$sum_gamerounds,size = 5000,replace = FALSE)
+qqnorm(sample_cookie_cats)
+qqline(sample_cookie_cats,col="red")
+shapiro.test(sample_cookie_cats)
+```
+
+Confirmado! Bem vamos fazer uma transformação usando `log`só para poder analisar o "shape" da distribuição, mas como queremos os dados reais vamos olhar as estatisticas novamente:
+
+```{r,echo=TRUE}
+summary(cookie_cats$sum_gamerounds)
+```
+
+Média de 52 rounds! Será que vamos encontrar alguma diferença na quantidade de rounds jogados dependendo de qual barreira foi usada?
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
+cookie_cats%>%
+  group_by(version)%>%
+  summarize(mean_gamerounds = mean(sum_gamerounds))
+
+cookie_cats%>%
+  filter(sum_gamerounds<45000)%>%
+ggplot(aes(log(sum_gamerounds),fill=version))+
+  geom_density(alpha = .3)
+
+cookie_cats%>%
+  filter(sum_gamerounds<45000)%>%
+ggplot(aes(x=version,y = log(sum_gamerounds)))+
+  geom_boxplot()
+
+```
+
+Diferença mínima não acha?
+
+Mas e quanto a retenção de 1 ou 7 dias entre o grupo de controle e o de teste?
+
+```{r,echo=TRUE}
+cookie_cats%>%
+  group_by(version)%>%
+  summarize(mean_retention1 = mean(retention_1),mean_retention7 = mean(retention_7))
+
+cookie_cats%>%
+  gather(days_retention,value,4:5)%>%
+  ggplot(aes(x=version,fill=value))+
+  geom_bar(position = "fill")+
+  facet_wrap(~days_retention)
+```
+
+Parece que em termos de média, há uma diferença mínima em retenção entre a barreira no nível 30 ou 40, sendo a 30 a vencedora! Mas será essa diferença significativa?
+Interessante ver também o como os jogadores abandonam o jogo depois de uns dias já que a proporção de FALSE na retenção 7 dias é muito maior do que a de um dia.
+
+Agora que demos uma breve olhada em nossos dados, vamos para o teste!
+
+## Poder do Teste: Retenção após 1 dia
+
+Vamos primeiro trabalhar com a taxa de retenção após 1 dia. Qual seria o tamanho de cada amostra para realizarmos o teste? Como vamos utilizar uma regressão logística para isso, vamos calcular o tamanho da amostra usando a função `SSizeLogisticBin` do powerMediation package:
+
+```{r,echo=TRUE}
+total_sample_size <- SSizeLogisticBin(p1 = .448,
+                                      p2 = .442,
+                                      B = 0.5,
+                                      alpha = 0.05,
+                                      power = 0.8)
+
+```
+
+Como vimos na amostra, a taxa de retenção para o grupo controle(gate_30) é de 44,8%. Vamos usar essa taxa no parâmetro `p1`.
+Para o parâmetro `p2`, que se refere ao grupo de teste, vimos que, obtivemos uma taxa de 44.2%, aparentemente está acontecendo ao contrário do que estipulamos na nossa hipótese. A barreira no nível 40, esta tendo uma taxa de retenção menor do que a do nível 30. Para o teste, vamos seguir com esses valores de p1 e p2.
+Valor de Beta de 0,5, alpha 0,05 e poder de 0,8 que é o padrão normalmente utilizado para esse tipo de teste.
+
+Vamos ao resultado:
+
+```{r,echo=TRUE}
+total_sample_size
+```
+
+Nossa! Para esses parâmetros teríamos que ter 215.384 observações para cada grupo (controle e teste). Sendo que nossa base de dados toda só possui 90.189 observações. Impossível, não?
+
+Mas e se trabalharmos com nosso limite, digamos 44.700 observações para cada grupo, qual seria nosso intervalo de confiança `alpha`?
+
+```{r,echo=TRUE}
+
+total_sample_size <- SSizeLogisticBin(p1 = .448,
+                                      p2 = .442,
+                                      B = 0.5,
+                                      alpha = 0.65,
+                                      power = 0.8)
+
+total_sample_size 
+```
+Ficaríamos com um nível de significância abaixo de 50% (Em relação ao erro tipo I), isso ou abaixamos o poder do teste pela variável `power`, o que também não é uma opção!
+
+Então, podemos concluir que não podemos fazer o teste na taxa de retenção de 1 dia, sem antes aumentarmos o tamanho da amostra.
+
+Será que vamos conseguir realizar o teste na taxa de retenção para 7 dias?
+
+## Poder do Teste: Retenção após 7 dias
+
+Na taxa de retenção de 7 dias, tivemos uma diferença maior entre os grupos, 19% para a barreira no nível 30 e 18,2% no nível 40. Vamos supor uma diferença de 1% entre os grupos para calcular o tamanho da amostra.
+```{r,echo=TRUE}
+total_sample_size <- SSizeLogisticBin(p1 = .19,
+                                      p2 = .18,
+                                      B = 0.5,
+                                      alpha = 0.05,
+                                      power = 0.8)
+
+total_sample_size 
+
+
+```
+
+Parece que teríamos que ter 47.335 observações para cada grupo, para podermos fazer o teste. Um pouco mais do que nossa amostra máxima de 44.700. Vamos abaixar o intervalo de confiança para 94%:
+
+```{r,echo=TRUE}
+total_sample_size <- SSizeLogisticBin(p1 = .19,
+                                      p2 = .18,
+                                      B = 0.5,
+                                      alpha = 0.06,
+                                      power = 0.8)
+
+total_sample_size 
+
+
+```
+
+Agora sim, com 94% de confiança em não cometer o erro tipo I e com 80% de poder, teriamos uma amostra para cada grupo, um tamanho de 44.697 observações!
+Vamos seguir com essa premissa e fazer um teste A/B para a taxa de retenção após 7 dias.
+
+## Teste A/B taxa de retenção após 7 dias
+
+Sempre gosto de trabalhar com tamanhos de amostras iguais, então como o grupo teste possui mais observações do que o grupo controle, irei realizar uma amostragem aleatória para conseguir um tamanho de amostra igual ao grupo de controle com 44.700 observações!
+
+```{r,echo = TRUE}
+
+amostra_30<-cookie_cats%>%
+  filter(version == "gate_30")
+
+amostra_40<-cookie_cats%>%
+  filter(version == "gate_40")
+
+set.seed(128)
+amostra_40_test<-sample_n(amostra_40,size = 44700,replace = FALSE)
+
+
+cookie_cats_ready<-bind_rows(amostra_30,amostra_40_test)
+
+cookie_cats_ready%>%
+  group_by(version)%>%
+  count()
+```
+
+Estamos prontos! Ao teste!
+
+```{r,echo=TRUE}
+
+ab_experiment_results <- glm(retention_7 ~ version,
+                             family = "binomial",
+                             data = cookie_cats_ready) %>%
+  tidy()
+
+ab_experiment_results%>%
+  kable()%>%
+   kable_styling(bootstrap_options = "striped", full_width = F)
+
+```
+
+Parece que como o valor-p é menor do que 0,05, temos uma diferença significativa entre os grupos, mas não como queríamos. Como o parâmetro `estimate` deu um valor pequeno, porém negativo, podemos concluir que **para o período que foram coletados os dados sem pensar em qualquer outro fator que talvez possa estar atrapalhando nosso teste**, a barreira no nível 30 possui capacidade de reter um pouco mais de jogadores, do que a barreira no nível 40!
+
+Desse modo, concluímos nosso teste. Embora seja um trabalho meramente demonstrativo do teste, é interessante sempre pensarmos em todo tipo de fator que possa atrapalhá-lo. 
+
+Será que a época do ano (sazonalidade) pode estar afetando a taxa de retenção?
+
+Ações promocionais do período, talvez?
+
+Ou algum concorrente do jogo, que retirou-se, por motivos de melhoria da interface por um mês, pode ter causado um aumento na taxa de retenção?
+
+Fica para refletir!
+
+Abraços e sucesso!
